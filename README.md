@@ -1,0 +1,174 @@
+# 🃏 Lil Poker RL Agent
+
+**Python:** 3.10+ &nbsp;|&nbsp; **License:** [GPL v3](LICENSE) &nbsp;|&nbsp; **RL Library:** [Stable-Baselines3](https://stable-baselines3.readthedocs.io/) (PPO) &nbsp;|&nbsp; **Env:** [Gymnasium](https://gymnasium.farama.org/) 0.29+
+
+A portable Reinforcement Learning agent for Texas Hold'em built using **Gymnasium** and **Stable-Baselines3 (PPO)**.
+It trains offline inside a high-speed simulator and plays online on a live
+**[lil-poker](https://github.com/LilRaime/lil-poker)** Go backend via WebSockets.
+
+---
+
+## 📂 Project Structure
+
+- `poker_env/` - Core Gymnasium interface:
+  - `base_env.py`: Abstract Gymnasium base environment.
+  - `action_space.py`: Action mapping (Fold, Check/Call, Raise Min, Raise Pot, All-in).
+  - `observation.py`: Converts raw game state dictionaries into a normalized float32 vector of shape `(168,)` (including hole cards, board cards, stacks, blinds, relative positions, hand strength, board texture, action history grids, and opponent profiles).
+- `adapters/` - Integration adapters:
+  - `simulator/`: Offline simulator utilizing the `treys` library for showdown evaluation.
+  - `lil_poker/`: WebSocket + HTTP API client to connect the bot to the live Go backend.
+- `agent/` - CLI scripts:
+  - `train.py`: Trains the PPO model inside vectorized simulators.
+  - `evaluate.py`: Evaluates the trained agent against simulator bots.
+  - `play_live.py`: Runs the trained agent inside a live poker room.
+
+---
+
+## 🚀 Installation & Setup
+
+1. **Create and activate a virtual environment:**
+   - **Unix-like:**
+     ```bash
+     python -m venv .venv
+     source .venv/bin/activate
+     ```
+   - **Windows PowerShell:**
+     ```powershell
+     python -m venv .venv_win
+     .\.venv_win\Scripts\activate
+     ```
+     > **If you get "running scripts is disabled"** run this once (no admin needed):
+     > ```powershell
+     > Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
+     > ```
+     > Or bypass without changing policy: `& .\.venv_win\Scripts\Activate.ps1`
+
+
+2. **Install the package in editable mode:**
+   ```bash
+   pip install -e .
+   ```
+   > **Note:** For CPU-only training (recommended for small MLP networks — avoids PCIe bottleneck):
+   > ```bash
+   > pip install torch --index-url https://download.pytorch.org/whl/cpu
+   > pip install -e .
+   > ```
+
+
+---
+
+## 💻 Command Reference & Usage
+
+### 1. Training the Agent (`agent.train`)
+Train the PPO model in the offline simulator.
+```bash
+python -m agent.train [arguments]
+```
+- **Arguments:**
+  - `--envs <int>` (Default: `4`): Number of parallel environments (simulated tables) to run. Set this to your CPU physical core count (e.g., 6 or 8) for maximum speed.
+  - `--timesteps <int>` (Default: `250000`): Total timesteps (steps) to train. Recommended: `1000000` to `3000000` for a solid self-play policy.
+  - `--lr <float>` (Default: `3e-4`): Learning rate for PPO.
+  - `--self-play` (Action flag): Trains against snapshots of the model itself instead of heuristic rule-based bots. Highly recommended for robust policies.
+  - `--device <str>` (Default: `auto`): Hardware device to run training (`cpu` or `cuda`). Recommended `cpu` for small MLP architectures.
+  - `--num-threads <int>` (Default: `1`): Number of CPU threads per environment. Setting to `1` is strongly recommended for parallel environments to avoid thread contention.
+  - `--n-steps <int>` (Default: `2048`): Number of steps collected per environment before updating the policy.
+  - `--batch-size <int>` (Default: `256`): Mini-batch size for PPO gradient updates.
+  - `--n-epochs <int>` (Default: `10`): Number of epochs to optimize the PPO loss on each update.
+- **Example (Standard training against heuristics):**
+  ```bash
+  python -m agent.train --envs 6 --timesteps 500000
+  ```
+- **Example (Recommended high-performance self-play training for a professional agent):**
+  ```bash
+  python -m agent.train --envs 8 --timesteps 3000000 --self-play --device cpu --num-threads 1 --n-steps 1024 --batch-size 2048 --n-epochs 4
+  ```
+
+### 2. Evaluating the Agent (`agent.evaluate`)
+Test the trained agent against the rule-based simulator bots and see decisions step-by-step.
+```bash
+python -m agent.evaluate [arguments]
+```
+- **Arguments:**
+  - `--algo <recurrent_ppo|ppo>` (Default: `recurrent_ppo`): Model algorithm (MLP PPO or Recurrent LSTM PPO).
+  - `--model <path>` (Default: `models/ppo_poker_agent` / `models/ppo_mlp_agent`): Path to the saved zip model file.
+  - `--episodes <int>` (Default: `10`): Number of episodes (hands) to play.
+  - `--players <int>` (Default: `2`): Number of players at the table during evaluation.
+  - `--device <str>` (Default: `cpu`): Device to run inference on (`cpu`, `cuda`, or `auto`).
+- **Example:**
+  ```bash
+  python -m agent.evaluate --algo ppo --model models/ppo_mlp_agent --episodes 10 --device cpu
+  ```
+
+### 3. Playing Live on the Server (`agent.play_live`)
+Run the trained agent to play inside a real lobby room on the `lil-poker` Go backend.
+```bash
+python -m agent.play_live --room <room_id> [arguments]
+```
+- **Required Arguments:**
+  - `--room <str>`: The 6-character room ID (e.g. `HF4YL8`) created in the Web UI.
+- **Optional Arguments:**
+  - `--algo <recurrent_ppo|ppo>` (Default: `recurrent_ppo`): Model algorithm type.
+  - `--model <path>` (Default: `models/ppo_poker_agent` / `models/ppo_mlp_agent`): Path to the trained PPO model.
+  - `--url <str>` (Default: `http://localhost:8090`): Base URL of the API.
+  - `--name <str>` (Default: `PPO_Bot`): Nickname of the bot (max 12 characters).
+  - `--device <str>` (Default: `cpu`): Device to run inference on (`cpu`, `cuda`, or `auto`).
+- **Example:**
+  ```bash
+  python -m agent.play_live --algo ppo --room HF4YL8 --device cpu
+  ```
+
+---
+
+## ⚡ Performance Optimizations
+
+This repository implements advanced performance optimizations to avoid typical Python/RL overheads:
+- **Fast Hand Strength Evaluator:** The real-time state encoder uses `phevaluator` for O(1) mathematical lookup of 5 to 7 card ranks, eliminating costly list manipulations.
+- **Card Object Caching:** For the simulator, all `treys.Card` objects for 52 cards are pre-computed at module initialization. This completely eliminates string parsing (`Card.new`) in the hot loop.
+- **Single Lookup Table:** The `treys.Evaluator` is a global module singleton, preventing the expensive reconstruction of the 7,462-hand mathematical lookup table on every step.
+- **Deck Copying:** The deck array is cloned using `copy()` instead of list comprehensions on resets.
+- These modifications boost the offline training speed from **160 FPS to over 2800+ FPS** on standard CPU hardware.
+
+---
+
+## 🐳 Docker Deployment
+
+You can build and run the training inside Docker:
+
+1. **Build the image:**
+   ```bash
+   docker build -t lil-poker-rl .
+   ```
+
+2. **Run training and mount a volume to save models on your host machine:**
+   - **Unix-like:**
+     ```bash
+     docker run -v $(pwd)/models:/app/models lil-poker-rl
+     ```
+   - **Windows PowerShell:**
+     ```powershell
+     docker run -v ${PWD}\models:/app/models lil-poker-rl
+     ```
+
+---
+
+## 🧪 Running Tests
+
+The test suite uses **pytest** and covers environment correctness, chip conservation, and reward finiteness.
+
+```bash
+# Install dev dependencies first (if not already installed)
+pip install -e ".[dev]"
+
+# Run all tests
+pytest tests/
+
+# Run with verbose output
+pytest tests/ -v
+```
+
+---
+
+## 📄 License
+
+This project is licensed under the **GNU General Public License v3.0**.
+See the [LICENSE](LICENSE).

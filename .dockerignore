@@ -1,0 +1,13 @@
+.git/
+.venv/
+.venv_win/
+.vscode/
+.idea/
+.pytest_cache/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.content
+ppo_poker_tensorboard/
+*.egg-info/

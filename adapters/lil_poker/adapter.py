@@ -76,7 +76,12 @@ class LilPokerEnv(BasePokerEnv):
     def _wait_for_my_turn(self, resetting: bool = False) -> dict:
         state = self._drain_websocket()
         if state:
-            if state.get("phase") == "Waiting" and len(state.get("players", [])) >= 2:
+            players = state.get("players", [])
+            if players:
+                my_status = self._get_player_status(state)
+                if not my_status:
+                    raise ConnectionError("Player is no longer seated at the table. Exiting.")
+            if state.get("phase") == "Waiting" and len(players) >= 2:
                 self._start_new_hand()
             if state.get("phase") not in ["Showdown", "Waiting"] and state.get("active_player_id") == self.player_id:
                 return state
@@ -94,7 +99,12 @@ class LilPokerEnv(BasePokerEnv):
                 state = json.loads(msg)
                 if "players" in state and "phase" in state:
                     self.game_state = state
-                    if state.get("phase") == "Waiting" and len(state.get("players", [])) >= 2:
+                    players = state.get("players", [])
+                    if players:
+                        my_status = self._get_player_status(state)
+                        if not my_status:
+                            raise ConnectionError("Player is no longer seated at the table. Exiting.")
+                    if state.get("phase") == "Waiting" and len(players) >= 2:
                         self._start_new_hand()
                     if state.get("phase") not in ["Showdown", "Waiting"] and state.get("active_player_id") == self.player_id:
                         self.ws.settimeout(None)
@@ -102,6 +112,10 @@ class LilPokerEnv(BasePokerEnv):
                     if not resetting and state.get("phase") in ["Showdown", "Waiting"]:
                         self.ws.settimeout(None)
                         return state
+
+            except ConnectionError as e:
+                print(f"Terminating bot client: {e}")
+                raise e
 
             except (websocket.WebSocketTimeoutException, socket.timeout):
                 print("WS idle timeout, sending keepalive ping...")

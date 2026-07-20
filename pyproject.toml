@@ -18,6 +18,9 @@ dependencies = [
     "websocket-client>=1.6.0",
     "treys>=0.1.8",
     "phevaluator>=0.5.0",
+    "onnx>=1.14.0",
+    "onnxruntime>=1.16.0",
+    "onnxscript>=0.1.0",
 ]
 
 [project.optional-dependencies]

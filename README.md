@@ -20,7 +20,9 @@ It trains offline inside a high-speed simulator and plays online on a live
 - `agent/` - CLI scripts:
   - `train.py`: Trains the PPO model inside vectorized simulators.
   - `evaluate.py`: Evaluates the trained agent against simulator bots.
-  - `play_live.py`: Runs the trained agent inside a live poker room.
+  - `play_live.py`: Runs the trained agent inside a live poker room (supports ONNX auto-detection).
+  - `export_onnx.py`: Exports a trained SB3 `.zip` model to ONNX format.
+  - `onnx_agent.py`: Lightweight ONNX Runtime inference wrapper (no PyTorch required).
 
 ---
 
@@ -107,7 +109,7 @@ python -m agent.play_live --room <room_id> [arguments]
 - **Required Arguments:**
   - `--room <str>`: The 6-character room ID (e.g. `HF4YL8`) created in the Web UI.
 - **Optional Arguments:**
-  - `--algo <recurrent_ppo|ppo>` (Default: `recurrent_ppo`): Model algorithm type.
+  - `--algo <recurrent_ppo|ppo>` (Default: `ppo`): Model algorithm type.
   - `--model <path>` (Default: `models/ppo_poker_agent` / `models/ppo_mlp_agent`): Path to the trained PPO model.
   - `--url <str>` (Default: `http://localhost:8090`): Base URL of the API.
   - `--name <str>` (Default: `PPO_Bot`): Nickname of the bot (max 12 characters).
@@ -116,6 +118,19 @@ python -m agent.play_live --room <room_id> [arguments]
   ```bash
   python -m agent.play_live --algo ppo --room HF4YL8 --device cpu
   ```
+
+### 4. Exporting to ONNX & Running ONNX Runtime Inference (`agent.export_onnx`)
+Export PyTorch PPO models to lightweight ONNX format with embedded observation normalization for ultra-fast, zero-PyTorch inference.
+```bash
+# Export trained PyTorch model to ONNX format
+python -m agent.export_onnx --model models/ppo_mlp_agent.zip --vec-norm models/vec_normalize.pkl --output models/ppo_mlp_agent.onnx
+
+# Evaluate using ONNX Runtime
+python -m agent.evaluate --algo ppo --onnx --onnx-model models/ppo_mlp_agent.onnx --episodes 10
+
+# Play live using ONNX Runtime
+python -m agent.play_live --room HF4YL8 --algo ppo --onnx --onnx-model models/ppo_mlp_agent.onnx
+```
 
 ---
 
@@ -132,22 +147,30 @@ This repository implements advanced performance optimizations to avoid typical P
 
 ## 🐳 Docker Deployment
 
-You can build and run the training inside Docker:
+### 1. Main Production ONNX Bot Container (`Dockerfile` - ~360MB)
+This is the default lightweight image used by the `lil-poker` Go backend when clicking **"Add Bot"** in the Web UI.
+The trained `models/ppo_mlp_agent.onnx` model is **baked into the image** — no volume mount needed at runtime.
+```bash
+# 1. Export your trained PyTorch model to ONNX (run once on host machine)
+python -m agent.export_onnx --model models/ppo_mlp_agent.zip --output models/ppo_mlp_agent.onnx
 
-1. **Build the image:**
-   ```bash
-   docker build -t lil-poker-rl .
-   ```
+# 2. Build production image (tagged 'lil-poker-rl')
+docker build -t lil-poker-rl .
 
-2. **Run training and mount a volume to save models on your host machine:**
-   - **Unix-like:**
-     ```bash
-     docker run -v $(pwd)/models:/app/models lil-poker-rl
-     ```
-   - **Windows PowerShell:**
-     ```powershell
-     docker run -v ${PWD}\models:/app/models lil-poker-rl
-     ```
+# 3. (Optional) Run bot manually connecting to a live room
+#    Note: no ENTRYPOINT — full command required
+docker run --net=host lil-poker-rl python -m agent.play_live --room HF4YL8 --url http://localhost:8090
+```
+
+### 2. Training Container (`Dockerfile.train` - PyTorch + SB3)
+For training models inside Docker:
+```bash
+# Build training image
+docker build -f Dockerfile.train -t lil-poker-rl-train .
+
+# Run training and mount local models directory
+docker run -v $(pwd)/models:/app/models lil-poker-rl-train
+```
 
 ---
 

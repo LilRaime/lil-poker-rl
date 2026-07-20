@@ -6,6 +6,7 @@ from stable_baselines3 import PPO
 from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
 from adapters.simulator.sim_env import SimulatorEnv
 from poker_env.action_space import PokerAction
+from agent.onnx_agent import ONNXAgent
 
 
 def main():
@@ -18,29 +19,48 @@ def main():
                         help="Number of players at the table (default: 2).")
     parser.add_argument("--device",   type=str, default="cpu",
                         help="Device to run inference on (default: cpu). Use 'cuda' or 'auto' if desired.")
+    parser.add_argument("--onnx", action="store_true",
+                        help="Run inference using ONNX Runtime instead of PyTorch.")
+    parser.add_argument("--onnx-model", type=str, default=None,
+                        help="Path to exported ONNX model (.onnx file).")
     args = parser.parse_args()
-    if args.model is None:
-        args.model = "models/ppo_mlp_agent" if args.algo == "ppo" else "models/ppo_poker_agent"
 
-    vec_env = DummyVecEnv([lambda: SimulatorEnv(num_players=args.players)])
-
-    vec_normalize_path = "models/vec_normalize.pkl"
-    if os.path.exists(vec_normalize_path):
-        env = VecNormalize.load(vec_normalize_path, vec_env)
-        env.training = False
-        env.norm_reward = False
-        print("VecNormalize stats loaded.")
-    else:
+    if args.onnx:
+        onnx_path = args.onnx_model
+        if onnx_path is None:
+            onnx_path = "models/ppo_mlp_agent.onnx" if args.algo == "ppo" else "models/ppo_poker_agent.onnx"
+        print(f"Loading ONNX model from: {onnx_path}")
+        try:
+            model = ONNXAgent(onnx_path)
+            print("ONNX Runtime engine loaded successfully.")
+        except Exception as e:
+            print(f"Could not load ONNX model: {e}. Running with random actions.")
+            model = None
+        vec_env = DummyVecEnv([lambda: SimulatorEnv(num_players=args.players)])
         env = vec_env
-        print("No VecNormalize stats found — using raw observations.")
+    else:
+        if args.model is None:
+            args.model = "models/ppo_mlp_agent" if args.algo == "ppo" else "models/ppo_poker_agent"
 
-    try:
-        model_cls = PPO if args.algo == "ppo" else RecurrentPPO
-        model = model_cls.load(args.model, device=args.device)
-        print(f"Model loaded successfully on device: {args.device}.")
-    except Exception as e:
-        print(f"Could not load model: {e}. Running with random actions.")
-        model = None
+        vec_env = DummyVecEnv([lambda: SimulatorEnv(num_players=args.players)])
+
+        vec_normalize_path = "models/vec_normalize.pkl"
+        if os.path.exists(vec_normalize_path):
+            env = VecNormalize.load(vec_normalize_path, vec_env)
+            env.training = False
+            env.norm_reward = False
+            print("VecNormalize stats loaded.")
+        else:
+            env = vec_env
+            print("No VecNormalize stats found — using raw observations.")
+
+        try:
+            model_cls = PPO if args.algo == "ppo" else RecurrentPPO
+            model = model_cls.load(args.model, device=args.device)
+            print(f"PyTorch Model loaded successfully on device: {args.device}.")
+        except Exception as e:
+            print(f"Could not load PyTorch model: {e}. Running with random actions.")
+            model = None
 
     for ep in range(args.episodes):
         obs = env.reset()
@@ -54,7 +74,11 @@ def main():
         while not done:
             steps += 1
             if model:
-                if args.algo == "recurrent_ppo":
+                if args.onnx:
+                    action, lstm_states = model.predict(obs, state=lstm_states, episode_start=episode_starts, deterministic=True)
+                    if not isinstance(action, np.ndarray):
+                        action = np.array([action])
+                elif args.algo == "recurrent_ppo":
                     action, lstm_states = model.predict(
                         obs,
                         state=lstm_states,

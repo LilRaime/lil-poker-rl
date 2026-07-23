@@ -147,7 +147,19 @@ This repository implements advanced performance optimizations to avoid typical P
 - **Card Object Caching:** For the simulator, all `treys.Card` objects for 52 cards are pre-computed at module initialization. This completely eliminates string parsing (`Card.new`) in the hot loop.
 - **Single Lookup Table:** The `treys.Evaluator` is a global module singleton, preventing the expensive reconstruction of the 7,462-hand mathematical lookup table on every step.
 - **Deck Copying:** The deck array is cloned using `copy()` instead of list comprehensions on resets.
-- These modifications boost the offline training speed from **160 FPS to over 2800+ FPS** on standard CPU hardware.
+- These modifications boost the offline training speed from **160 FPS to over 2000+ FPS** on standard CPU hardware.
+
+> [!WARNING]
+> **Do not train from a Windows NTFS drive inside WSL** (e.g. `/mnt/c/`, `/mnt/e/`).
+> Cross-filesystem I/O through the WSL boundary causes severe subprocess spawning overhead,
+> dropping throughput from **~2000 FPS → ~300 FPS** (~7× slowdown).
+> Always clone the repository into the native Linux filesystem (e.g. `~/lil-poker-rl`):
+> ```bash
+> git clone https://github.com/LilRaime/lil-poker-rl.git ~/lil-poker-rl
+> cd ~/lil-poker-rl
+> ```
+> On Windows without WSL, use the Windows Python directly — it achieves ~1000 FPS
+> and avoids the filesystem boundary entirely.
 
 ---
 

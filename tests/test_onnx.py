@@ -22,7 +22,7 @@ def test_onnx_export_and_inference_parity():
         model.save(zip_path)
         assert os.path.exists(zip_path)
         
-        export_onnx(zip_path, onnx_path, vec_norm_path=None, algo="ppo", obs_dim=168)
+        export_onnx(zip_path, onnx_path, vec_norm_path=None, obs_dim=168)
         assert os.path.exists(onnx_path)
         
         agent = ONNXAgent(onnx_path)
@@ -52,7 +52,7 @@ def test_onnx_batch_prediction():
         onnx_path = os.path.join(tmp_dir, "test_ppo_batch.onnx")
         
         model.save(zip_path)
-        export_onnx(zip_path, onnx_path, vec_norm_path=None, algo="ppo", obs_dim=168)
+        export_onnx(zip_path, onnx_path, vec_norm_path=None, obs_dim=168)
         
         agent = ONNXAgent(onnx_path)
         batch_obs = np.random.randn(5, 168).astype(np.float32)

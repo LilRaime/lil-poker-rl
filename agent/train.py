@@ -50,6 +50,12 @@ def main():
                         help="Games for Elo evaluation after each snapshot (default: 1000).")
     parser.add_argument("--no-elo", action="store_true",
                         help="Skip Elo evaluation after saving each snapshot.")
+    parser.add_argument("--ppo-weight", type=float, default=0.60,
+                        help="League: relative weight for PPO-pool opponents (default: 0.60).")
+    parser.add_argument("--rule-weight", type=float, default=0.25,
+                        help="League: relative weight for the rule-based heuristic bot (default: 0.25).")
+    parser.add_argument("--random-weight", type=float, default=0.15,
+                        help="League: relative weight for the random bot (default: 0.15).")
     parser.add_argument("--device", type=str, default="auto",
                         help="Device to train on: cpu, cuda, or auto (default: auto)")
     parser.add_argument("--num-threads", type=int, default=1,
@@ -92,6 +98,19 @@ def main():
         env_cls = SimulatorEnv
 
     env_kwargs = dict(min_players=args.min_players, max_players=args.max_players)
+    if args.league:
+        env_kwargs.update(
+            ppo_weight=args.ppo_weight,
+            rule_weight=args.rule_weight,
+            random_weight=args.random_weight,
+        )
+        total_w = args.ppo_weight + args.rule_weight + args.random_weight
+        print(
+            f"League distribution: "
+            f"PPO {args.ppo_weight/total_w:.0%}  "
+            f"Rule {args.rule_weight/total_w:.0%}  "
+            f"Random {args.random_weight/total_w:.0%}"
+        )
     save_path = "models/ppo_mlp_agent"
 
     if args.self_play:

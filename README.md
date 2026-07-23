@@ -70,7 +70,11 @@ python -m agent.train [arguments]
   - `--envs <int>` (Default: `4`): Number of parallel environments (simulated tables) to run. Set this to your CPU physical core count (e.g., 6 or 8) for maximum speed.
   - `--timesteps <int>` (Default: `250000`): Total timesteps (steps) to train. Recommended: `1000000` to `3000000` for a solid self-play policy.
   - `--lr <float>` (Default: `3e-4`): Learning rate for PPO.
-  - `--self-play` (Action flag): Trains against snapshots of the model itself instead of heuristic rule-based bots. Highly recommended for robust policies.
+  - `--self-play` (Action flag): Trains against frozen PPO snapshots from `models/opponent_pool/`. Snapshots are saved as `snapshot_Xk.zip` every `--opponent-update-interval` steps.
+  - `--league` (Action flag): Enables full **League Training** mode — bots are drawn from RandomBot, RuleBot, and historical PPO snapshots, weighted by Elo rating. Implies `--self-play`.
+  - `--opponent-update-interval <int>` (Default: `100000`): Steps between opponent snapshots.
+  - `--eval-games <int>` (Default: `1000`): Games played for Elo evaluation after each snapshot.
+  - `--no-elo` (Action flag): Skip Elo evaluation after each snapshot (faster training).
   - `--device <str>` (Default: `auto`): Hardware device to run training (`cpu` or `cuda`). Recommended `cpu` for small MLP architectures.
   - `--num-threads <int>` (Default: `1`): Number of CPU threads per environment. Setting to `1` is strongly recommended for parallel environments to avoid thread contention.
   - `--n-steps <int>` (Default: `2048`): Number of steps collected per environment before updating the policy.
@@ -80,9 +84,13 @@ python -m agent.train [arguments]
   ```bash
   python -m agent.train --envs 6 --timesteps 500000
   ```
-- **Example (Recommended high-performance self-play training for a professional agent):**
+- **Example (Self-play with Elo tracking):**
   ```bash
   python -m agent.train --envs 8 --timesteps 3000000 --self-play --device cpu --num-threads 1 --n-steps 1024 --batch-size 2048 --n-epochs 4
+  ```
+- **Example (Full League Training — recommended):**
+  ```bash
+  python -m agent.train --envs 8 --timesteps 3000000 --league --device cpu --num-threads 1 --n-steps 1024 --batch-size 2048 --n-epochs 4
   ```
 
 ### 2. Evaluating the Agent (`agent.evaluate`)
@@ -91,14 +99,13 @@ Test the trained agent against the rule-based simulator bots and see decisions s
 python -m agent.evaluate [arguments]
 ```
 - **Arguments:**
-  - `--algo <recurrent_ppo|ppo>` (Default: `recurrent_ppo`): Model algorithm (MLP PPO or Recurrent LSTM PPO).
-  - `--model <path>` (Default: `models/ppo_poker_agent` / `models/ppo_mlp_agent`): Path to the saved zip model file.
+  - `--model <path>` (Default: `models/ppo_mlp_agent`): Path to the saved zip model file.
   - `--episodes <int>` (Default: `10`): Number of episodes (hands) to play.
   - `--players <int>` (Default: `2`): Number of players at the table during evaluation.
   - `--device <str>` (Default: `cpu`): Device to run inference on (`cpu`, `cuda`, or `auto`).
 - **Example:**
   ```bash
-  python -m agent.evaluate --algo ppo --model models/ppo_mlp_agent --episodes 10 --device cpu
+  python -m agent.evaluate --model models/ppo_mlp_agent --episodes 10 --device cpu
   ```
 
 ### 3. Playing Live on the Server (`agent.play_live`)
@@ -109,14 +116,13 @@ python -m agent.play_live --room <room_id> [arguments]
 - **Required Arguments:**
   - `--room <str>`: The 6-character room ID (e.g. `HF4YL8`) created in the Web UI.
 - **Optional Arguments:**
-  - `--algo <recurrent_ppo|ppo>` (Default: `ppo`): Model algorithm type.
-  - `--model <path>` (Default: `models/ppo_poker_agent` / `models/ppo_mlp_agent`): Path to the trained PPO model.
+  - `--model <path>` (Default: `models/ppo_mlp_agent`): Path to the trained PPO model.
   - `--url <str>` (Default: `http://localhost:8090`): Base URL of the API.
   - `--name <str>` (Default: `PPO_Bot`): Nickname of the bot (max 12 characters).
   - `--device <str>` (Default: `cpu`): Device to run inference on (`cpu`, `cuda`, or `auto`).
 - **Example:**
   ```bash
-  python -m agent.play_live --algo ppo --room HF4YL8 --device cpu
+  python -m agent.play_live --room HF4YL8 --device cpu
   ```
 
 ### 4. Exporting to ONNX & Running ONNX Runtime Inference (`agent.export_onnx`)
@@ -126,10 +132,10 @@ Export PyTorch PPO models to lightweight ONNX format with embedded observation n
 python -m agent.export_onnx --model models/ppo_mlp_agent.zip --vec-norm models/vec_normalize.pkl --output models/ppo_mlp_agent.onnx
 
 # Evaluate using ONNX Runtime
-python -m agent.evaluate --algo ppo --onnx --onnx-model models/ppo_mlp_agent.onnx --episodes 10
+python -m agent.evaluate --onnx --onnx-model models/ppo_mlp_agent.onnx --episodes 10
 
 # Play live using ONNX Runtime
-python -m agent.play_live --room HF4YL8 --algo ppo --onnx --onnx-model models/ppo_mlp_agent.onnx
+python -m agent.play_live --room HF4YL8 --onnx --onnx-model models/ppo_mlp_agent.onnx
 ```
 
 ---

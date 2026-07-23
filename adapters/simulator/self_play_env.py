@@ -1,27 +1,61 @@
-"""SelfPlayEnv — SimulatorEnv where bots use a RecurrentPPO model chosen from a pool.
+"""SelfPlayEnv — SimulatorEnv where bots use a PPO model chosen from a pool.
 
 To prevent the agent from collapsing into a degenerate strategy (e.g. always
 folding) during self-play, we use fictitious play. The environment maintains a
 pool of historical checkpoints in ``models/opponent_pool/``. At the start of each
 episode/hand, a random model is selected from the pool to act as the opponent.
 
-A class-level model cache is used to avoid reloading the models from disk on
+A class-level LRU model cache is used to avoid reloading models from disk on
 every hand, preventing training bottlenecks.
 """
 
 import os
 import random
 import numpy as np
+from collections import OrderedDict
 
 from adapters.simulator.sim_env import SimulatorEnv
 from poker_env.action_space import PokerAction
 from poker_env.observation import encode_state
 
 
-class SelfPlayEnv(SimulatorEnv):
-    """SimulatorEnv where non-agent players are controlled by a RecurrentPPO model."""
+class LRUModelCache:
+    """Thread-unsafe LRU cache for loaded SB3 model objects.
 
-    _MODEL_CACHE = {}
+    Uses an ``OrderedDict`` for O(1) get / put / evict operations.
+    The least-recently-used entry is evicted when the cache is full.
+    """
+
+    def __init__(self, maxsize: int = 15):
+        self._cache: OrderedDict = OrderedDict()
+        self._maxsize = maxsize
+
+    def get(self, key: str):
+        """Return cached model or ``None`` on miss (promotes entry to MRU)."""
+        if key not in self._cache:
+            return None
+        self._cache.move_to_end(key)
+        return self._cache[key]
+
+    def put(self, key: str, value) -> None:
+        """Insert / update *key* and evict LRU entry if over capacity."""
+        if key in self._cache:
+            self._cache.move_to_end(key)
+        self._cache[key] = value
+        if len(self._cache) > self._maxsize:
+            self._cache.popitem(last=False)  # evict least-recently-used
+
+    def __contains__(self, key: str) -> bool:
+        return key in self._cache
+
+    def __len__(self) -> int:
+        return len(self._cache)
+
+
+class SelfPlayEnv(SimulatorEnv):
+    """SimulatorEnv where non-agent players are controlled by a PPO model."""
+
+    _MODEL_CACHE: LRUModelCache = LRUModelCache(maxsize=15)
 
     def __init__(
         self,
@@ -40,7 +74,6 @@ class SelfPlayEnv(SimulatorEnv):
 
     def reset(self, seed=None, options=None):
         self._select_random_opponent()
-
         return super().reset(seed=seed, options=options)
 
     def _select_random_opponent(self) -> None:
@@ -70,7 +103,7 @@ class SelfPlayEnv(SimulatorEnv):
         self._opponent_loaded = False
 
     def _ensure_opponent_loaded(self) -> None:
-        """Load opponent model from path (using cache) + VecNormalize."""
+        """Load opponent model from path (using LRU cache) + VecNormalize."""
         if self._opponent_loaded:
             return
         self._opponent_loaded = True
@@ -78,16 +111,15 @@ class SelfPlayEnv(SimulatorEnv):
         if not os.path.exists(self._opponent_model_path):
             return
 
-        if self._opponent_model_path in self._MODEL_CACHE:
-            self._opponent_model = self._MODEL_CACHE[self._opponent_model_path]
+        cached = self._MODEL_CACHE.get(self._opponent_model_path)
+        if cached is not None:
+            self._opponent_model = cached
         else:
             try:
                 from stable_baselines3 import PPO
-                self._opponent_model = PPO.load(self._opponent_model_path, device="cpu")
-
-                if len(self._MODEL_CACHE) >= 15:
-                    self._MODEL_CACHE.pop(next(iter(self._MODEL_CACHE)))
-                self._MODEL_CACHE[self._opponent_model_path] = self._opponent_model
+                model = PPO.load(self._opponent_model_path, device="cpu")
+                self._MODEL_CACHE.put(self._opponent_model_path, model)
+                self._opponent_model = model
             except Exception as exc:
                 print(f"[SelfPlayEnv] Load error for {self._opponent_model_path}: {exc}")
                 self._opponent_model = None
@@ -124,11 +156,7 @@ class SelfPlayEnv(SimulatorEnv):
         if self._vec_normalize is not None:
             obs = self._vec_normalize.normalize_obs(obs)
 
-        action, _ = self._opponent_model.predict(
-            obs,
-            deterministic=True
-        )
-
+        action, _ = self._opponent_model.predict(obs, deterministic=True)
         self._apply_bot_action(bot, int(action[0]))
 
     def _apply_bot_action(self, bot: dict, action_idx: int) -> None:

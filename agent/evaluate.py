@@ -1,7 +1,6 @@
 import os
 import argparse
 import numpy as np
-from sb3_contrib import RecurrentPPO
 from stable_baselines3 import PPO
 from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
 from adapters.simulator.sim_env import SimulatorEnv
@@ -11,13 +10,12 @@ from agent.onnx_agent import ONNXAgent
 
 def main():
     parser = argparse.ArgumentParser(description="Evaluate PPO RL Agent in Simulator")
-    parser.add_argument("--algo", choices=["recurrent_ppo", "ppo"], default="recurrent_ppo",
-                        help="Model algorithm to load (default: recurrent_ppo).")
-    parser.add_argument("--model",    type=str, default=None)
+    parser.add_argument("--model", type=str, default=None,
+                        help="Path to the saved zip model (default: models/ppo_mlp_agent).")
     parser.add_argument("--episodes", type=int, default=10)
-    parser.add_argument("--players",  type=int, default=2,
+    parser.add_argument("--players", type=int, default=2,
                         help="Number of players at the table (default: 2).")
-    parser.add_argument("--device",   type=str, default="cpu",
+    parser.add_argument("--device", type=str, default="cpu",
                         help="Device to run inference on (default: cpu). Use 'cuda' or 'auto' if desired.")
     parser.add_argument("--onnx", action="store_true",
                         help="Run inference using ONNX Runtime instead of PyTorch.")
@@ -26,9 +24,7 @@ def main():
     args = parser.parse_args()
 
     if args.onnx:
-        onnx_path = args.onnx_model
-        if onnx_path is None:
-            onnx_path = "models/ppo_mlp_agent.onnx" if args.algo == "ppo" else "models/ppo_poker_agent.onnx"
+        onnx_path = args.onnx_model or "models/ppo_mlp_agent.onnx"
         print(f"Loading ONNX model from: {onnx_path}")
         try:
             model = ONNXAgent(onnx_path)
@@ -40,7 +36,7 @@ def main():
         env = vec_env
     else:
         if args.model is None:
-            args.model = "models/ppo_mlp_agent" if args.algo == "ppo" else "models/ppo_poker_agent"
+            args.model = "models/ppo_mlp_agent"
 
         vec_env = DummyVecEnv([lambda: SimulatorEnv(num_players=args.players)])
 
@@ -55,11 +51,10 @@ def main():
             print("No VecNormalize stats found — using raw observations.")
 
         try:
-            model_cls = PPO if args.algo == "ppo" else RecurrentPPO
-            model = model_cls.load(args.model, device=args.device)
-            print(f"PyTorch Model loaded successfully on device: {args.device}.")
+            model = PPO.load(args.model, device=args.device)
+            print(f"Model loaded successfully on device: {args.device}.")
         except Exception as e:
-            print(f"Could not load PyTorch model: {e}. Running with random actions.")
+            print(f"Could not load model: {e}. Running with random actions.")
             model = None
 
     for ep in range(args.episodes):
@@ -67,30 +62,19 @@ def main():
         done = False
         steps = 0
         total_reward = 0.0
-        lstm_states = None
-        episode_starts = np.ones((env.num_envs,), dtype=bool)
 
         print(f"\n--- Episode {ep + 1} ---")
         while not done:
             steps += 1
             if model:
                 if args.onnx:
-                    action, lstm_states = model.predict(obs, state=lstm_states, episode_start=episode_starts, deterministic=True)
+                    action, _ = model.predict(obs, state=None, episode_start=None, deterministic=True)
                     if not isinstance(action, np.ndarray):
                         action = np.array([action])
-                elif args.algo == "recurrent_ppo":
-                    action, lstm_states = model.predict(
-                        obs,
-                        state=lstm_states,
-                        episode_start=episode_starts,
-                        deterministic=True,
-                    )
                 else:
                     action, _ = model.predict(obs, deterministic=True)
             else:
                 action = np.array([env.action_space.sample()])
-
-            episode_starts = np.zeros((env.num_envs,), dtype=bool)
 
             obs, rewards, dones, infos = env.step(action)
             reward = float(rewards[0])
@@ -119,6 +103,7 @@ def main():
 
         print(f"Finished Episode {ep + 1} | Total Steps: {steps} | "
               f"Cumulative Reward: {total_reward:.4f}")
+
 
 if __name__ == "__main__":
     main()

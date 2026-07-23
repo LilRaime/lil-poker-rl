@@ -6,7 +6,6 @@ from poker_env.action_space import PokerAction
 from agent.onnx_agent import ONNXAgent
 
 try:
-    from sb3_contrib import RecurrentPPO
     from stable_baselines3 import PPO
     from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
     HAS_PYTORCH = True
@@ -35,8 +34,6 @@ except ImportError:
 
 def main():
     parser = argparse.ArgumentParser(description="Run trained RL Agent inside a live lil-poker room")
-    parser.add_argument("--algo", choices=["recurrent_ppo", "ppo"], default="ppo",
-                        help="Model algorithm to load (default: ppo).")
     parser.add_argument("--model", type=str, default=None)
     parser.add_argument("--url", type=str, default="http://localhost:8090")
     parser.add_argument("--room", type=str, required=True)
@@ -54,7 +51,7 @@ def main():
     vec_env = DummyVecEnv([lambda: LilPokerEnv(base_url=args.url, room_id=args.room, username=args.name)])
     raw_env = vec_env.envs[0]
 
-    default_onnx_path = "models/ppo_mlp_agent.onnx" if args.algo == "ppo" else "models/ppo_poker_agent.onnx"
+    default_onnx_path = "models/ppo_mlp_agent.onnx"
     use_onnx = (
         args.onnx
         or not HAS_PYTORCH
@@ -71,7 +68,7 @@ def main():
         print("ONNX Bot is ready and listening for game updates...", flush=True)
     else:
         if args.model is None:
-            args.model = "models/ppo_mlp_agent" if args.algo == "ppo" else "models/ppo_poker_agent"
+            args.model = "models/ppo_mlp_agent"
 
         vec_normalize_path = "models/vec_normalize.pkl"
         if os.path.exists(vec_normalize_path):
@@ -84,8 +81,7 @@ def main():
             print("WARNING: No VecNormalize stats found — using raw observations.")
 
         print(f"Loading PyTorch model: {args.model} on device: {args.device}")
-        model_cls = PPO if args.algo == "ppo" else RecurrentPPO
-        model = model_cls.load(args.model, device=args.device)
+        model = PPO.load(args.model, device=args.device)
         print("Bot is ready and listening for game updates...", flush=True)
 
     try:
@@ -101,27 +97,16 @@ def main():
                     start_chips = p["chips"]
                     break
 
-            lstm_states = None
-            episode_starts = np.ones((env.num_envs,), dtype=bool)
-
             print(f"\n--- New Hand Started (Starting Stack: {start_chips}) ---")
 
             while not done:
                 if use_onnx:
-                    action, lstm_states = model.predict(obs, state=lstm_states, episode_start=episode_starts, deterministic=True)
+                    action, _ = model.predict(obs, state=None, episode_start=None, deterministic=True)
                     if not isinstance(action, np.ndarray):
                         action = np.array([action])
-                elif args.algo == "recurrent_ppo":
-                    action, lstm_states = model.predict(
-                        obs,
-                        state=lstm_states,
-                        episode_start=episode_starts,
-                        deterministic=True
-                    )
                 else:
                     action, _ = model.predict(obs, deterministic=True)
 
-                episode_starts = np.zeros((env.num_envs,), dtype=bool)
                 action_name = PokerAction(int(action[0])).name
 
                 state = raw_env.game_state
@@ -156,6 +141,7 @@ def main():
         print("\nStopping bot and closing connections...")
     finally:
         env.close()
+
 
 if __name__ == "__main__":
     main()

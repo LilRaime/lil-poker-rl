@@ -4,7 +4,6 @@ import pickle
 import torch
 import torch.nn as nn
 from stable_baselines3 import PPO
-from sb3_contrib import RecurrentPPO
 
 
 class OnnxableMLPPolicy(nn.Module):
@@ -32,16 +31,15 @@ class OnnxableMLPPolicy(nn.Module):
         return action
 
 
-def export_onnx(model_path: str, output_path: str, vec_norm_path: str = None, algo: str = "ppo", obs_dim: int = 168):
+def export_onnx(model_path: str, output_path: str, vec_norm_path: str = None, obs_dim: int = 168):
     if not os.path.exists(model_path):
         if not model_path.endswith(".zip") and os.path.exists(model_path + ".zip"):
             model_path = model_path + ".zip"
         else:
             raise FileNotFoundError(f"Model file not found: {model_path}")
 
-    model_cls = PPO if algo == "ppo" else RecurrentPPO
-    print(f"Loading SB3 model ({algo.upper()}) from '{model_path}'...")
-    model = model_cls.load(model_path, device="cpu")
+    print(f"Loading PPO model from '{model_path}'...")
+    model = PPO.load(model_path, device="cpu")
     policy = model.policy.eval()
 
     obs_mean, obs_var = None, None
@@ -88,13 +86,11 @@ def main():
                         help="Path to VecNormalize statistics (.pkl)")
     parser.add_argument("--output", type=str, default="models/ppo_mlp_agent.onnx",
                         help="Output path for exported ONNX model (.onnx)")
-    parser.add_argument("--algo", choices=["ppo", "recurrent_ppo"], default="ppo",
-                        help="Algorithm type (default: ppo)")
     parser.add_argument("--obs-dim", type=int, default=168,
                         help="Observation vector dimension (default: 168)")
     args = parser.parse_args()
 
-    export_onnx(args.model, args.output, args.vec_norm, args.algo, args.obs_dim)
+    export_onnx(args.model, args.output, args.vec_norm, args.obs_dim)
 
 
 if __name__ == "__main__":
